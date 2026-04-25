@@ -25,14 +25,22 @@ DEFAULT_REPLICATION = 1  # single-broker dev cluster
 # Durability / performance knobs
 PRODUCER_ACKS = "all"                  # wait for full ISR
 CONSUMER_AUTO_OFFSET_RESET = "earliest"
-CONSUMER_MAX_POLL_RECORDS = 5          # pace ourselves vs. yfinance rate limits
+CONSUMER_MAX_POLL_RECORDS = 10         # pace ourselves vs. yfinance rate limits
+INTER_STOCK_DELAY_SEC = 0.15           # sleep between stocks to avoid Yahoo 429s
+YFINANCE_RETRIES = 3                   # retry attempts on empty/failed fetch
 REQUEST_TIMEOUT_MS = 30_000
 SESSION_TIMEOUT_MS = 30_000
 
 
 # ─── Scanner ──────────────────────────────────────────────────────────────────
 INDEX_SYMBOL = "^NSEI"
+INDEX_SYMBOL_USA = "^GSPC"
+
 STOCKS_FILE = Path(__file__).parent / "stocks.txt"
+STOCKS_FILE_USA = Path(__file__).parent / "stock_usa.txt"
+
+VOL_THRESHOLD_INDIA = 50_000_000   # ₹5 Crore
+VOL_THRESHOLD_USA   = 3_000_000    # $3 Million
 
 
 def load_stocks(path: Path = STOCKS_FILE) -> List[str]:

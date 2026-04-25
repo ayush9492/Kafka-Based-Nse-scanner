@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NSE Stock Scanner — RS New High + Buy Signal</title>
+  <title>Stock Scanner — RS New High + Buy Signal</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
@@ -46,7 +46,6 @@
       overflow-x: hidden;
     }
 
-    /* Ambient glow */
     body::before {
       content: '';
       position: fixed;
@@ -64,32 +63,20 @@
 
     .mono { font-family: 'JetBrains Mono', monospace; }
 
-    /* Scrollbar */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: var(--bg-primary); }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
     ::-webkit-scrollbar-thumb:hover { background: var(--border-glow); }
 
-    /* Animations */
     @keyframes fadeInUp {
       from { opacity: 0; transform: translateY(20px); }
       to { opacity: 1; transform: translateY(0); }
-    }
-    @keyframes pulse-ring {
-      0% { transform: scale(0.9); opacity: 1; }
-      100% { transform: scale(1.5); opacity: 0; }
-    }
-    @keyframes shimmer {
-      0% { background-position: -200% 0; }
-      100% { background-position: 200% 0; }
     }
     @keyframes blink {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.3; }
     }
-    .animate-in {
-      animation: fadeInUp 0.5s ease-out both;
-    }
+    .animate-in { animation: fadeInUp 0.5s ease-out both; }
     .stagger-1 { animation-delay: 0.05s; }
     .stagger-2 { animation-delay: 0.1s; }
     .stagger-3 { animation-delay: 0.15s; }
@@ -102,26 +89,66 @@
   <script type="text/babel">
     const { useState, useEffect, useRef, useCallback } = React;
 
-    // ── Config ──────────────────────────────────────────────────────────────
-    // Change this to your deployed backend URL
     const API_BASE = window.location.origin;
 
-    // ── Utility ─────────────────────────────────────────────────────────────
-    const formatNumber = (n) => {
-      if (n >= 10000000) return (n / 10000000).toFixed(2) + ' Cr';
-      if (n >= 100000) return (n / 100000).toFixed(2) + ' L';
-      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+    // ── Formatting ──────────────────────────────────────────────────────────
+    const formatPrice = (p, mkt) => {
+      if (mkt === 'usa') return '$' + Number(p).toLocaleString('en-US', { maximumFractionDigits: 2 });
+      return '₹' + Number(p).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    };
+
+    const formatVolume = (n, mkt) => {
+      if (mkt === 'usa') {
+        if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + 'B';
+        if (n >= 1_000_000)     return (n / 1_000_000).toFixed(2) + 'M';
+        if (n >= 1_000)         return (n / 1_000).toFixed(1) + 'K';
+        return n.toString();
+      }
+      if (n >= 10_000_000) return (n / 10_000_000).toFixed(2) + ' Cr';
+      if (n >= 100_000)    return (n / 100_000).toFixed(2) + ' L';
+      if (n >= 1_000)      return (n / 1_000).toFixed(1) + 'K';
       return n.toString();
     };
 
-    const formatPrice = (p) => '₹' + Number(p).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-
     // ── Components ──────────────────────────────────────────────────────────
 
-    function Header({ status, lastScan }) {
+    function MarketToggle({ market, onChange }) {
+      return (
+        <div style={{
+          display: 'flex',
+          background: 'var(--bg-secondary)',
+          borderRadius: 8,
+          padding: 3,
+          border: '1px solid var(--border)',
+          gap: 3,
+        }}>
+          {[
+            { key: 'india', label: '🇮🇳 INDIA' },
+            { key: 'usa',   label: '🇺🇸 USA' },
+          ].map(({ key, label }) => (
+            <button key={key} onClick={() => onChange(key)} style={{
+              padding: '6px 16px',
+              borderRadius: 6,
+              border: 'none',
+              background: market === key ? 'var(--bg-card)' : 'transparent',
+              color: market === key ? 'var(--text-primary)' : 'var(--text-muted)',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              fontFamily: "'DM Sans', sans-serif",
+              boxShadow: market === key ? 'var(--shadow)' : 'none',
+              letterSpacing: '0.02em',
+            }}>{label}</button>
+          ))}
+        </div>
+      );
+    }
+
+    function Header({ status, lastScan, market, onMarketChange }) {
       return (
         <header style={{
-          padding: '24px 32px',
+          padding: '20px 32px',
           borderBottom: '1px solid var(--border)',
           display: 'flex',
           alignItems: 'center',
@@ -145,17 +172,20 @@
             }}>⚡</div>
             <div>
               <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>
-                NSE Scanner
+                Stock Scanner
               </h1>
               <p className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                 RS NEW HIGH × BUY SIGNAL
               </p>
             </div>
           </div>
+
+          <MarketToggle market={market} onChange={onMarketChange} />
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             {lastScan && (
               <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                Last scan: {new Date(lastScan).toLocaleString('en-IN')}
+                Last scan: {new Date(lastScan).toLocaleString()}
               </span>
             )}
             <StatusBadge status={status} />
@@ -166,11 +196,11 @@
 
     function StatusBadge({ status }) {
       const config = {
-        idle: { color: 'var(--text-muted)', bg: 'rgba(100,116,139,0.1)', label: 'IDLE', dot: false },
-        scanning: { color: 'var(--accent-amber)', bg: 'var(--accent-amber-bg)', label: 'SCANNING', dot: true },
+        idle:     { color: 'var(--text-muted)',   bg: 'rgba(100,116,139,0.1)', label: 'IDLE',     dot: false },
+        scanning: { color: 'var(--accent-amber)', bg: 'var(--accent-amber-bg)', label: 'SCANNING', dot: true  },
         complete: { color: 'var(--accent-green)', bg: 'var(--accent-green-bg)', label: 'COMPLETE', dot: false },
-        error: { color: 'var(--accent-red)', bg: 'var(--accent-red-bg)', label: 'ERROR', dot: false },
-      }[status] || { color: 'var(--text-muted)', bg: 'transparent', label: status.toUpperCase(), dot: false };
+        error:    { color: 'var(--accent-red)',   bg: 'var(--accent-red-bg)',   label: 'ERROR',    dot: false },
+      }[status] || { color: 'var(--text-muted)', bg: 'transparent', label: status?.toUpperCase(), dot: false };
 
       return (
         <div className="mono" style={{
@@ -196,26 +226,21 @@
     function ScanButton({ status, onScan }) {
       const isScanning = status === 'scanning';
       return (
-        <button
-          onClick={onScan}
-          disabled={isScanning}
-          style={{
-            padding: '14px 36px',
-            borderRadius: 12,
-            border: 'none',
-            background: isScanning
-              ? 'var(--bg-card)'
-              : 'linear-gradient(135deg, var(--accent-green) 0%, #059669 100%)',
-            color: isScanning ? 'var(--text-muted)' : '#fff',
-            fontSize: 15,
-            fontWeight: 700,
-            fontFamily: "'DM Sans', sans-serif",
-            cursor: isScanning ? 'not-allowed' : 'pointer',
-            transition: 'all 0.3s ease',
-            boxShadow: isScanning ? 'none' : '0 4px 24px rgba(34,197,94,0.3)',
-            letterSpacing: '-0.01em',
-          }}
-        >
+        <button onClick={onScan} disabled={isScanning} style={{
+          padding: '14px 36px',
+          borderRadius: 12,
+          border: 'none',
+          background: isScanning
+            ? 'var(--bg-card)'
+            : 'linear-gradient(135deg, var(--accent-green) 0%, #059669 100%)',
+          color: isScanning ? 'var(--text-muted)' : '#fff',
+          fontSize: 15, fontWeight: 700,
+          fontFamily: "'DM Sans', sans-serif",
+          cursor: isScanning ? 'not-allowed' : 'pointer',
+          transition: 'all 0.3s ease',
+          boxShadow: isScanning ? 'none' : '0 4px 24px rgba(34,197,94,0.3)',
+          letterSpacing: '-0.01em',
+        }}>
           {isScanning ? '⏳ Scanning...' : '🔍 Run Full Scan'}
         </button>
       );
@@ -237,15 +262,9 @@
               {scanned}/{total} · {progress}%
             </span>
           </div>
-          <div style={{
-            height: 6, borderRadius: 3,
-            background: 'var(--bg-primary)',
-            overflow: 'hidden',
-          }}>
+          <div style={{ height: 6, borderRadius: 3, background: 'var(--bg-primary)', overflow: 'hidden' }}>
             <div style={{
-              width: `${progress}%`,
-              height: '100%',
-              borderRadius: 3,
+              width: `${progress}%`, height: '100%', borderRadius: 3,
               background: 'linear-gradient(90deg, var(--accent-green), var(--accent-cyan))',
               transition: 'width 0.4s ease',
               boxShadow: '0 0 12px rgba(34,197,94,0.4)',
@@ -263,7 +282,6 @@
           borderRadius: 'var(--radius)',
           padding: 24,
           transition: 'all 0.2s ease',
-          cursor: 'default',
           position: 'relative',
           overflow: 'hidden',
         }}
@@ -295,9 +313,8 @@
       );
     }
 
-    function StockTable({ stocks, details, title, color, icon }) {
+    function StockTable({ stocks, details, title, color, icon, market }) {
       if (!stocks || stocks.length === 0) return null;
-
       return (
         <div className="animate-in" style={{
           background: 'var(--bg-card)',
@@ -314,16 +331,9 @@
             <span style={{ fontSize: 18 }}>{icon}</span>
             <h3 style={{ fontSize: 14, fontWeight: 600 }}>{title}</h3>
             <span className="mono" style={{
-              marginLeft: 'auto',
-              fontSize: 11,
-              color,
-              background: color + '15',
-              padding: '3px 10px',
-              borderRadius: 12,
-              fontWeight: 600,
-            }}>
-              {stocks.length} stocks
-            </span>
+              marginLeft: 'auto', fontSize: 11, color,
+              background: color + '15', padding: '3px 10px', borderRadius: 12, fontWeight: 600,
+            }}>{stocks.length} stocks</span>
           </div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -331,28 +341,22 @@
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
                   {['Symbol', 'Price', 'Change', 'Volume', 'Vol Ratio', 'RS Value'].map(h => (
                     <th key={h} className="mono" style={{
-                      padding: '10px 16px',
-                      fontSize: 10,
-                      fontWeight: 600,
-                      color: 'var(--text-muted)',
-                      textAlign: 'left',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                      whiteSpace: 'nowrap',
+                      padding: '10px 16px', fontSize: 10, fontWeight: 600,
+                      color: 'var(--text-muted)', textAlign: 'left',
+                      textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap',
                     }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {stocks.map((sym, i) => {
-                  const d = details[sym + '.NS'] || details[sym] || {};
+                {stocks.map((sym) => {
+                  const d = details[sym] || {};
                   const chg = d.change_pct || 0;
                   const chgColor = chg >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
                   return (
                     <tr key={sym} style={{
                       borderBottom: '1px solid var(--border)',
-                      transition: 'background 0.15s',
-                      cursor: 'pointer',
+                      transition: 'background 0.15s', cursor: 'pointer',
                     }}
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
@@ -363,22 +367,20 @@
                         </span>
                       </td>
                       <td className="mono" style={{ padding: '12px 16px', fontSize: 13 }}>
-                        {d.price ? formatPrice(d.price) : '—'}
+                        {d.price ? formatPrice(d.price, market) : '—'}
                       </td>
                       <td className="mono" style={{ padding: '12px 16px', fontSize: 13, color: chgColor, fontWeight: 600 }}>
                         {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
                       </td>
                       <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-secondary)' }}>
-                        {d.volume ? formatNumber(d.volume) : '—'}
+                        {d.volume ? formatVolume(d.volume, market) : '—'}
                       </td>
                       <td className="mono" style={{ padding: '12px 16px', fontSize: 12 }}>
                         {d.volume_ratio ? (
                           <span style={{
                             color: d.volume_ratio >= 1.5 ? 'var(--accent-green)' : 'var(--text-muted)',
                             fontWeight: d.volume_ratio >= 1.5 ? 600 : 400,
-                          }}>
-                            {d.volume_ratio.toFixed(1)}x
-                          </span>
+                          }}>{d.volume_ratio.toFixed(1)}x</span>
                         ) : '—'}
                       </td>
                       <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: 'var(--accent-cyan)' }}>
@@ -394,84 +396,74 @@
       );
     }
 
-    function EmptyState({ onScan }) {
+    function EmptyState({ onScan, market }) {
+      const isIndia = market === 'india';
       return (
         <div className="animate-in" style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '80px 32px',
-          textAlign: 'center',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          padding: '80px 32px', textAlign: 'center',
         }}>
           <div style={{
-            width: 80, height: 80,
-            borderRadius: 20,
+            width: 80, height: 80, borderRadius: 20,
             background: 'linear-gradient(135deg, var(--accent-green-bg), var(--accent-blue-bg))',
             border: '1px solid var(--border)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 36,
-            marginBottom: 24,
-          }}>📊</div>
+            fontSize: 36, marginBottom: 24,
+          }}>
+            {isIndia ? '📊' : '🗽'}
+          </div>
           <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, letterSpacing: '-0.02em' }}>
-            Stock Scanner Ready
+            {isIndia ? 'NSE Scanner Ready' : 'US Market Scanner Ready'}
           </h2>
-          <p style={{ fontSize: 14, color: 'var(--text-muted)', maxWidth: 420, lineHeight: 1.6, marginBottom: 32 }}>
-            Scans 180+ NSE stocks for <strong style={{color:'var(--accent-green)'}}>Relative Strength New Highs</strong> and
-            multi-factor <strong style={{color:'var(--accent-blue)'}}>Buy Signals</strong> (DI+, EMA stack, RSI, volume, SMA trend).
+          <p style={{ fontSize: 14, color: 'var(--text-muted)', maxWidth: 440, lineHeight: 1.6, marginBottom: 32 }}>
+            Scans <strong style={{ color: 'var(--text-secondary)' }}>
+              {isIndia ? '200+ NSE stocks' : 'S&P 500 stocks'}
+            </strong> for{' '}
+            <strong style={{ color: 'var(--accent-green)' }}>Relative Strength New Highs</strong> vs{' '}
+            <strong style={{ color: 'var(--accent-cyan)' }}>{isIndia ? 'Nifty 50' : 'S&P 500'}</strong> and
+            multi-factor <strong style={{ color: 'var(--accent-blue)' }}>Buy Signals</strong>.
             Stocks hitting both are the final picks.
           </p>
           <ScanButton status="idle" onScan={onScan} />
           <div className="mono" style={{
-            marginTop: 40,
-            fontSize: 11,
-            color: 'var(--text-muted)',
-            display: 'flex',
-            gap: 24,
-            flexWrap: 'wrap',
-            justifyContent: 'center',
+            marginTop: 40, fontSize: 11, color: 'var(--text-muted)',
+            display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center',
           }}>
-            <span>📈 RS vs NIFTY 50</span>
+            <span>{isIndia ? '📈 RS vs Nifty 50' : '📈 RS vs S&P 500'}</span>
             <span>📊 DI+ Crossover</span>
             <span>🔄 EMA 10/20/50</span>
             <span>💹 Weekly RSI ≥ 59</span>
-            <span>📦 Volume Spike</span>
+            <span>{isIndia ? '💰 Vol > ₹5Cr' : '💰 Vol > $3M'}</span>
           </div>
         </div>
       );
     }
 
-    function InfoBox() {
+    function InfoBox({ market }) {
+      const isIndia = market === 'india';
+      const criteria = [
+        { tag: 'RS',  label: `Relative Strength making new 123-day high vs ${isIndia ? 'Nifty 50' : 'S&P 500'}`, color: 'var(--accent-cyan)' },
+        { tag: 'DI+', label: 'Plus DI jump ≥ 10 in a single day (5-period)',                                      color: 'var(--accent-green)' },
+        { tag: 'EMA', label: 'EMA 10 > EMA 20 > EMA 50 (bullish alignment)',                                      color: 'var(--accent-blue)' },
+        { tag: 'RSI', label: 'Weekly RSI ≥ 59 (momentum confirmation)',                                           color: 'var(--accent-purple)' },
+        { tag: 'SMA', label: '50-day SMA rising for 5 consecutive days',                                          color: 'var(--accent-amber)' },
+        { tag: 'VOL', label: `Volume above 20-day avg + ${isIndia ? '₹5Cr trade value' : '$3M trade value'}`,     color: 'var(--accent-green)' },
+      ];
       return (
         <div className="animate-in" style={{
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
-          padding: 24,
-          marginTop: 8,
+          background: 'var(--bg-card)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)', padding: 24, marginTop: 8,
         }}>
           <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>
-            📋 Scan Criteria
+            📋 Scan Criteria — {isIndia ? '🇮🇳 India (NSE)' : '🇺🇸 USA'}
           </h4>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-            gap: 12,
-          }}>
-            {[
-              { tag: 'RS', label: 'Relative Strength making new 123-day high vs Nifty 50', color: 'var(--accent-cyan)' },
-              { tag: 'DI+', label: 'Plus DI jump ≥ 10 in a single day (5-period)', color: 'var(--accent-green)' },
-              { tag: 'EMA', label: 'EMA 10 > EMA 20 > EMA 50 (bullish alignment)', color: 'var(--accent-blue)' },
-              { tag: 'RSI', label: 'Weekly RSI ≥ 59 (momentum confirmation)', color: 'var(--accent-purple)' },
-              { tag: 'SMA', label: '50-day SMA rising for 5 consecutive days', color: 'var(--accent-amber)' },
-              { tag: 'VOL', label: 'Volume above 20-day average + ₹5Cr trade value', color: 'var(--accent-green)' },
-            ].map(c => (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+            {criteria.map(c => (
               <div key={c.tag} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                 <span className="mono" style={{
                   fontSize: 10, fontWeight: 700, color: c.color,
-                  background: c.color + '15',
-                  padding: '2px 8px', borderRadius: 4,
-                  whiteSpace: 'nowrap',
+                  background: c.color + '15', padding: '2px 8px', borderRadius: 4, whiteSpace: 'nowrap',
                 }}>{c.tag}</span>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>{c.label}</span>
               </div>
@@ -482,40 +474,30 @@
     }
 
     // ── App ──────────────────────────────────────────────────────────────────
-
     function App() {
-      const [status, setStatus] = useState('idle');
-      const [progress, setProgress] = useState({ progress: 0, current_stock: '', scanned_count: 0, total_stocks: 0 });
-      const [results, setResults] = useState(null);
-      const [tab, setTab] = useState('final');
-      const pollRef = useRef(null);
+      const [market, setMarketState] = useState('india');
+      const [scanStatus, setScanStatus]   = useState('idle');
+      const [scanProgress, setScanProgress] = useState({ progress: 0, current_stock: '', scanned_count: 0, total_stocks: 0 });
+      const [results, setResults]         = useState(null);
+      const [tab, setTab]                 = useState('final');
+      const pollRef   = useRef(null);
+      const marketRef = useRef('india');
 
-      const startScan = useCallback(async () => {
-        try {
-          const res = await fetch(`${API_BASE}/scan`, { method: 'POST' });
-          if (res.ok) {
-            setStatus('scanning');
-            setResults(null);
-            startPolling();
-          }
-        } catch (e) {
-          alert('Cannot connect to backend. Make sure the API is running at ' + API_BASE);
-        }
-      }, []);
+      // keep marketRef in sync
+      useEffect(() => { marketRef.current = market; }, [market]);
 
-      const startPolling = () => {
+      const startPolling = useCallback(() => {
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = setInterval(async () => {
+          const mkt = marketRef.current;
           try {
-            const res = await fetch(`${API_BASE}/status`);
+            const res  = await fetch(`${API_BASE}/status?market=${mkt}`);
             const data = await res.json();
-            setProgress(data);
-            setStatus(data.status);
-
+            setScanProgress(data);
+            setScanStatus(data.status);
             if (data.status === 'complete' || data.status === 'error') {
               clearInterval(pollRef.current);
-              // Fetch results
-              const rres = await fetch(`${API_BASE}/results`);
+              const rres  = await fetch(`${API_BASE}/results?market=${mkt}`);
               const rdata = await rres.json();
               setResults(rdata);
             }
@@ -523,94 +505,116 @@
             console.error('Poll error', e);
           }
         }, 1500);
-      };
+      }, []);
 
+      const startScan = useCallback(async () => {
+        const mkt = marketRef.current;
+        try {
+          const res = await fetch(`${API_BASE}/scan?market=${mkt}`, { method: 'POST' });
+          if (res.ok) {
+            setScanStatus('scanning');
+            setResults(null);
+            startPolling();
+          }
+        } catch (e) {
+          alert('Cannot connect to backend. Make sure the API is running at ' + API_BASE);
+        }
+      }, [startPolling]);
+
+      // On market switch: reset UI, load existing results for new market
       useEffect(() => {
-        // Check if there are existing results on load
-        fetch(`${API_BASE}/results`)
+        if (pollRef.current) clearInterval(pollRef.current);
+        setScanStatus('idle');
+        setScanProgress({ progress: 0, current_stock: '', scanned_count: 0, total_stocks: 0 });
+        setResults(null);
+
+        fetch(`${API_BASE}/results?market=${market}`)
           .then(r => r.json())
           .then(d => {
             if (d.status === 'complete') {
-              setStatus('complete');
+              setScanStatus('complete');
               setResults(d);
             } else if (d.status === 'scanning') {
-              setStatus('scanning');
+              setScanStatus('scanning');
               startPolling();
             }
           })
           .catch(() => {});
+
         return () => { if (pollRef.current) clearInterval(pollRef.current); };
+      }, [market, startPolling]);
+
+      const switchMarket = useCallback((m) => {
+        setMarketState(m);
+        setTab('final');
       }, []);
 
       const tabData = {
         final: { stocks: results?.final_stocks, title: 'Final Picks — RS High + Buy Signal', icon: '🎯', color: 'var(--accent-green)' },
-        rs: { stocks: results?.rs_highs, title: 'RS New Highs', icon: '📈', color: 'var(--accent-cyan)' },
-        buy: { stocks: results?.buy_signals, title: 'Buy Signals', icon: '💎', color: 'var(--accent-blue)' },
+        rs:    { stocks: results?.rs_highs,     title: 'RS New Highs',                       icon: '📈', color: 'var(--accent-cyan)' },
+        buy:   { stocks: results?.buy_signals,  title: 'Buy Signals',                        icon: '💎', color: 'var(--accent-blue)' },
       };
-
       const activeTab = tabData[tab];
 
       return (
         <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-          <Header status={status} lastScan={results?.last_scan_time} />
+          <Header
+            status={scanStatus}
+            lastScan={results?.last_scan_time}
+            market={market}
+            onMarketChange={switchMarket}
+          />
 
           <main style={{ flex: 1, padding: '24px 32px', maxWidth: 1200, margin: '0 auto', width: '100%' }}>
-            {status === 'idle' && !results && <EmptyState onScan={startScan} />}
 
-            {status === 'scanning' && (
+            {scanStatus === 'idle' && !results && (
+              <EmptyState onScan={startScan} market={market} />
+            )}
+
+            {scanStatus === 'scanning' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                 <ProgressBar
-                  progress={progress.progress}
-                  current={progress.current_stock}
-                  scanned={progress.scanned_count}
-                  total={progress.total_stocks}
+                  progress={scanProgress.progress}
+                  current={scanProgress.current_stock}
+                  scanned={scanProgress.scanned_count}
+                  total={scanProgress.total_stocks}
                 />
               </div>
             )}
 
-            {results && status !== 'scanning' && (
+            {results && scanStatus !== 'scanning' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
                 {/* Stats */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                  gap: 16,
-                }}>
-                  <StatCard title="Final Picks" value={results.total_final} icon="🎯" color="var(--accent-green)" bgColor="var(--accent-green-bg)" delay={1} />
-                  <StatCard title="RS New Highs" value={results.total_rs} icon="📈" color="var(--accent-cyan)" bgColor="var(--accent-blue-bg)" delay={2} />
-                  <StatCard title="Buy Signals" value={results.total_buy} icon="💎" color="var(--accent-blue)" bgColor="var(--accent-blue-bg)" delay={3} />
-                  <StatCard title="Stocks Scanned" value={Object.keys(results.stock_details).length} icon="🔍" color="var(--text-muted)" bgColor="rgba(100,116,139,0.05)" delay={4} />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+                  <StatCard title="Final Picks"    value={results.total_final}                              icon="🎯" color="var(--accent-green)" bgColor="var(--accent-green-bg)"        delay={1} />
+                  <StatCard title="RS New Highs"   value={results.total_rs}                                 icon="📈" color="var(--accent-cyan)"  bgColor="var(--accent-blue-bg)"         delay={2} />
+                  <StatCard title="Buy Signals"    value={results.total_buy}                                icon="💎" color="var(--accent-blue)"  bgColor="var(--accent-blue-bg)"         delay={3} />
+                  <StatCard title="Stocks Scanned" value={Object.keys(results.stock_details).length}        icon="🔍" color="var(--text-muted)"   bgColor="rgba(100,116,139,0.05)"        delay={4} />
                 </div>
 
-                {/* Re-scan button */}
+                {/* Re-scan */}
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <ScanButton status={status} onScan={startScan} />
+                  <ScanButton status={scanStatus} onScan={startScan} />
                 </div>
 
-                {/* Tabs */}
+                {/* Result tabs */}
                 <div style={{
                   display: 'flex', gap: 4,
-                  background: 'var(--bg-secondary)',
-                  padding: 4, borderRadius: 10,
-                  border: '1px solid var(--border)',
-                  width: 'fit-content',
+                  background: 'var(--bg-secondary)', padding: 4, borderRadius: 10,
+                  border: '1px solid var(--border)', width: 'fit-content',
                 }}>
                   {[
                     { key: 'final', label: `Final Picks (${results.total_final})`, color: 'var(--accent-green)' },
-                    { key: 'rs', label: `RS Highs (${results.total_rs})`, color: 'var(--accent-cyan)' },
-                    { key: 'buy', label: `Buy Signals (${results.total_buy})`, color: 'var(--accent-blue)' },
+                    { key: 'rs',    label: `RS Highs (${results.total_rs})`,        color: 'var(--accent-cyan)'  },
+                    { key: 'buy',   label: `Buy Signals (${results.total_buy})`,    color: 'var(--accent-blue)'  },
                   ].map(t => (
                     <button key={t.key} onClick={() => setTab(t.key)} style={{
-                      padding: '8px 18px',
-                      borderRadius: 8,
-                      border: 'none',
+                      padding: '8px 18px', borderRadius: 8, border: 'none',
                       background: tab === t.key ? 'var(--bg-card)' : 'transparent',
                       color: tab === t.key ? t.color : 'var(--text-muted)',
-                      fontSize: 12,
-                      fontWeight: 600,
+                      fontSize: 12, fontWeight: 600,
                       fontFamily: "'DM Sans', sans-serif",
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
+                      cursor: 'pointer', transition: 'all 0.2s',
                       boxShadow: tab === t.key ? 'var(--shadow)' : 'none',
                     }}>{t.label}</button>
                   ))}
@@ -624,14 +628,12 @@
                     title={activeTab.title}
                     color={activeTab.color}
                     icon={activeTab.icon}
+                    market={market}
                   />
                 ) : (
                   <div style={{
-                    padding: 48,
-                    textAlign: 'center',
-                    color: 'var(--text-muted)',
-                    background: 'var(--bg-card)',
-                    borderRadius: 'var(--radius)',
+                    padding: 48, textAlign: 'center', color: 'var(--text-muted)',
+                    background: 'var(--bg-card)', borderRadius: 'var(--radius)',
                     border: '1px solid var(--border)',
                   }}>
                     <div style={{ fontSize: 32, marginBottom: 12 }}>🔇</div>
@@ -639,18 +641,14 @@
                   </div>
                 )}
 
-                <InfoBox />
+                <InfoBox market={market} />
               </div>
             )}
           </main>
 
-          <footer style={{
-            padding: '16px 32px',
-            borderTop: '1px solid var(--border)',
-            textAlign: 'center',
-          }}>
+          <footer style={{ padding: '16px 32px', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
             <p className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-              FOR EDUCATIONAL PURPOSES ONLY — NOT FINANCIAL ADVICE · Data from Yahoo Finance · Built with FastAPI + React
+              FOR EDUCATIONAL PURPOSES ONLY — NOT FINANCIAL ADVICE · Data from Yahoo Finance · Built with FastAPI + React + Kafka
             </p>
           </footer>
         </div>
