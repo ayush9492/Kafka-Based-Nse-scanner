@@ -1,0 +1,9 @@
+fastapi==0.115.0
+uvicorn==0.30.0
+yfinance>=0.2.40
+TA-Lib>=0.4.28
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Kafka pipeline
+kafka-python>=2.0.2

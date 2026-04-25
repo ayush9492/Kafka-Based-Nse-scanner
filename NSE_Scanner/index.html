@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NSE Stock Scanner — RS New High + Buy Signal</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #0a0e17;
+      --bg-secondary: #111827;
+      --bg-card: #151d2e;
+      --bg-card-hover: #1a2438;
+      --border: #1e293b;
+      --border-glow: #334155;
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent-green: #22c55e;
+      --accent-green-dim: #16a34a;
+      --accent-green-bg: rgba(34, 197, 94, 0.08);
+      --accent-red: #ef4444;
+      --accent-red-bg: rgba(239, 68, 68, 0.08);
+      --accent-amber: #f59e0b;
+      --accent-amber-bg: rgba(245, 158, 11, 0.08);
+      --accent-blue: #3b82f6;
+      --accent-blue-bg: rgba(59, 130, 246, 0.08);
+      --accent-purple: #a855f7;
+      --accent-purple-bg: rgba(168, 85, 247, 0.08);
+      --accent-cyan: #06b6d4;
+      --radius: 10px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Ambient glow */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 600px;
+      background: radial-gradient(ellipse, rgba(34,197,94,0.06) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #root { position: relative; z-index: 1; }
+
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-primary); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--border-glow); }
+
+    /* Animations */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.9); opacity: 1; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .animate-in {
+      animation: fadeInUp 0.5s ease-out both;
+    }
+    .stagger-1 { animation-delay: 0.05s; }
+    .stagger-2 { animation-delay: 0.1s; }
+    .stagger-3 { animation-delay: 0.15s; }
+    .stagger-4 { animation-delay: 0.2s; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ── Config ──────────────────────────────────────────────────────────────
+    // Change this to your deployed backend URL
+    const API_BASE = window.location.origin;
+
+    // ── Utility ─────────────────────────────────────────────────────────────
+    const formatNumber = (n) => {
+      if (n >= 10000000) return (n / 10000000).toFixed(2) + ' Cr';
+      if (n >= 100000) return (n / 100000).toFixed(2) + ' L';
+      if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+      return n.toString();
+    };
+
+    const formatPrice = (p) => '₹' + Number(p).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
+    // ── Components ──────────────────────────────────────────────────────────
+
+    function Header({ status, lastScan }) {
+      return (
+        <header style={{
+          padding: '24px 32px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 16,
+          background: 'linear-gradient(180deg, rgba(17,24,39,0.8) 0%, transparent 100%)',
+          backdropFilter: 'blur(12px)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 50,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{
+              width: 40, height: 40,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg, var(--accent-green) 0%, var(--accent-cyan) 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 20, fontWeight: 700,
+              boxShadow: '0 0 20px rgba(34,197,94,0.3)',
+            }}>⚡</div>
+            <div>
+              <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>
+                NSE Scanner
+              </h1>
+              <p className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                RS NEW HIGH × BUY SIGNAL
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            {lastScan && (
+              <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                Last scan: {new Date(lastScan).toLocaleString('en-IN')}
+              </span>
+            )}
+            <StatusBadge status={status} />
+          </div>
+        </header>
+      );
+    }
+
+    function StatusBadge({ status }) {
+      const config = {
+        idle: { color: 'var(--text-muted)', bg: 'rgba(100,116,139,0.1)', label: 'IDLE', dot: false },
+        scanning: { color: 'var(--accent-amber)', bg: 'var(--accent-amber-bg)', label: 'SCANNING', dot: true },
+        complete: { color: 'var(--accent-green)', bg: 'var(--accent-green-bg)', label: 'COMPLETE', dot: false },
+        error: { color: 'var(--accent-red)', bg: 'var(--accent-red-bg)', label: 'ERROR', dot: false },
+      }[status] || { color: 'var(--text-muted)', bg: 'transparent', label: status.toUpperCase(), dot: false };
+
+      return (
+        <div className="mono" style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '5px 12px', borderRadius: 20,
+          background: config.bg,
+          fontSize: 11, fontWeight: 600,
+          color: config.color,
+          border: `1px solid ${config.color}33`,
+        }}>
+          {config.dot && (
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: config.color,
+              animation: 'blink 1.2s infinite',
+            }} />
+          )}
+          {config.label}
+        </div>
+      );
+    }
+
+    function ScanButton({ status, onScan }) {
+      const isScanning = status === 'scanning';
+      return (
+        <button
+          onClick={onScan}
+          disabled={isScanning}
+          style={{
+            padding: '14px 36px',
+            borderRadius: 12,
+            border: 'none',
+            background: isScanning
+              ? 'var(--bg-card)'
+              : 'linear-gradient(135deg, var(--accent-green) 0%, #059669 100%)',
+            color: isScanning ? 'var(--text-muted)' : '#fff',
+            fontSize: 15,
+            fontWeight: 700,
+            fontFamily: "'DM Sans', sans-serif",
+            cursor: isScanning ? 'not-allowed' : 'pointer',
+            transition: 'all 0.3s ease',
+            boxShadow: isScanning ? 'none' : '0 4px 24px rgba(34,197,94,0.3)',
+            letterSpacing: '-0.01em',
+          }}
+        >
+          {isScanning ? '⏳ Scanning...' : '🔍 Run Full Scan'}
+        </button>
+      );
+    }
+
+    function ProgressBar({ progress, current, scanned, total }) {
+      return (
+        <div className="animate-in" style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
+          padding: 24,
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+            <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              Scanning <span className="mono" style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>{current}</span>
+            </span>
+            <span className="mono" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              {scanned}/{total} · {progress}%
+            </span>
+          </div>
+          <div style={{
+            height: 6, borderRadius: 3,
+            background: 'var(--bg-primary)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              width: `${progress}%`,
+              height: '100%',
+              borderRadius: 3,
+              background: 'linear-gradient(90deg, var(--accent-green), var(--accent-cyan))',
+              transition: 'width 0.4s ease',
+              boxShadow: '0 0 12px rgba(34,197,94,0.4)',
+            }} />
+          </div>
+        </div>
+      );
+    }
+
+    function StatCard({ title, value, icon, color, bgColor, delay }) {
+      return (
+        <div className={`animate-in stagger-${delay}`} style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
+          padding: 24,
+          transition: 'all 0.2s ease',
+          cursor: 'default',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+          onMouseEnter={e => {
+            e.currentTarget.style.borderColor = color + '44';
+            e.currentTarget.style.background = 'var(--bg-card-hover)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.borderColor = 'var(--border)';
+            e.currentTarget.style.background = 'var(--bg-card)';
+          }}
+        >
+          <div style={{
+            position: 'absolute', top: -20, right: -20,
+            width: 80, height: 80, borderRadius: '50%',
+            background: bgColor, filter: 'blur(30px)',
+            pointerEvents: 'none',
+          }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <span style={{ fontSize: 20 }}>{icon}</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {title}
+            </span>
+          </div>
+          <div className="mono" style={{ fontSize: 36, fontWeight: 700, color, letterSpacing: '-0.04em' }}>
+            {value}
+          </div>
+        </div>
+      );
+    }
+
+    function StockTable({ stocks, details, title, color, icon }) {
+      if (!stocks || stocks.length === 0) return null;
+
+      return (
+        <div className="animate-in" style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            padding: '16px 24px',
+            borderBottom: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: 'rgba(0,0,0,0.2)',
+          }}>
+            <span style={{ fontSize: 18 }}>{icon}</span>
+            <h3 style={{ fontSize: 14, fontWeight: 600 }}>{title}</h3>
+            <span className="mono" style={{
+              marginLeft: 'auto',
+              fontSize: 11,
+              color,
+              background: color + '15',
+              padding: '3px 10px',
+              borderRadius: 12,
+              fontWeight: 600,
+            }}>
+              {stocks.length} stocks
+            </span>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {['Symbol', 'Price', 'Change', 'Volume', 'Vol Ratio', 'RS Value'].map(h => (
+                    <th key={h} className="mono" style={{
+                      padding: '10px 16px',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: 'var(--text-muted)',
+                      textAlign: 'left',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                      whiteSpace: 'nowrap',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {stocks.map((sym, i) => {
+                  const d = details[sym + '.NS'] || details[sym] || {};
+                  const chg = d.change_pct || 0;
+                  const chgColor = chg >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                  return (
+                    <tr key={sym} style={{
+                      borderBottom: '1px solid var(--border)',
+                      transition: 'background 0.15s',
+                      cursor: 'pointer',
+                    }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <td style={{ padding: '12px 16px' }}>
+                        <span className="mono" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>
+                          {sym}
+                        </span>
+                      </td>
+                      <td className="mono" style={{ padding: '12px 16px', fontSize: 13 }}>
+                        {d.price ? formatPrice(d.price) : '—'}
+                      </td>
+                      <td className="mono" style={{ padding: '12px 16px', fontSize: 13, color: chgColor, fontWeight: 600 }}>
+                        {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
+                      </td>
+                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-secondary)' }}>
+                        {d.volume ? formatNumber(d.volume) : '—'}
+                      </td>
+                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12 }}>
+                        {d.volume_ratio ? (
+                          <span style={{
+                            color: d.volume_ratio >= 1.5 ? 'var(--accent-green)' : 'var(--text-muted)',
+                            fontWeight: d.volume_ratio >= 1.5 ? 600 : 400,
+                          }}>
+                            {d.volume_ratio.toFixed(1)}x
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="mono" style={{ padding: '12px 16px', fontSize: 12, color: 'var(--accent-cyan)' }}>
+                        {d.rs_value || '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    function EmptyState({ onScan }) {
+      return (
+        <div className="animate-in" style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '80px 32px',
+          textAlign: 'center',
+        }}>
+          <div style={{
+            width: 80, height: 80,
+            borderRadius: 20,
+            background: 'linear-gradient(135deg, var(--accent-green-bg), var(--accent-blue-bg))',
+            border: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 36,
+            marginBottom: 24,
+          }}>📊</div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 8, letterSpacing: '-0.02em' }}>
+            Stock Scanner Ready
+          </h2>
+          <p style={{ fontSize: 14, color: 'var(--text-muted)', maxWidth: 420, lineHeight: 1.6, marginBottom: 32 }}>
+            Scans 180+ NSE stocks for <strong style={{color:'var(--accent-green)'}}>Relative Strength New Highs</strong> and
+            multi-factor <strong style={{color:'var(--accent-blue)'}}>Buy Signals</strong> (DI+, EMA stack, RSI, volume, SMA trend).
+            Stocks hitting both are the final picks.
+          </p>
+          <ScanButton status="idle" onScan={onScan} />
+          <div className="mono" style={{
+            marginTop: 40,
+            fontSize: 11,
+            color: 'var(--text-muted)',
+            display: 'flex',
+            gap: 24,
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+          }}>
+            <span>📈 RS vs NIFTY 50</span>
+            <span>📊 DI+ Crossover</span>
+            <span>🔄 EMA 10/20/50</span>
+            <span>💹 Weekly RSI ≥ 59</span>
+            <span>📦 Volume Spike</span>
+          </div>
+        </div>
+      );
+    }
+
+    function InfoBox() {
+      return (
+        <div className="animate-in" style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)',
+          padding: 24,
+          marginTop: 8,
+        }}>
+          <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>
+            📋 Scan Criteria
+          </h4>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gap: 12,
+          }}>
+            {[
+              { tag: 'RS', label: 'Relative Strength making new 123-day high vs Nifty 50', color: 'var(--accent-cyan)' },
+              { tag: 'DI+', label: 'Plus DI jump ≥ 10 in a single day (5-period)', color: 'var(--accent-green)' },
+              { tag: 'EMA', label: 'EMA 10 > EMA 20 > EMA 50 (bullish alignment)', color: 'var(--accent-blue)' },
+              { tag: 'RSI', label: 'Weekly RSI ≥ 59 (momentum confirmation)', color: 'var(--accent-purple)' },
+              { tag: 'SMA', label: '50-day SMA rising for 5 consecutive days', color: 'var(--accent-amber)' },
+              { tag: 'VOL', label: 'Volume above 20-day average + ₹5Cr trade value', color: 'var(--accent-green)' },
+            ].map(c => (
+              <div key={c.tag} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <span className="mono" style={{
+                  fontSize: 10, fontWeight: 700, color: c.color,
+                  background: c.color + '15',
+                  padding: '2px 8px', borderRadius: 4,
+                  whiteSpace: 'nowrap',
+                }}>{c.tag}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>{c.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── App ──────────────────────────────────────────────────────────────────
+
+    function App() {
+      const [status, setStatus] = useState('idle');
+      const [progress, setProgress] = useState({ progress: 0, current_stock: '', scanned_count: 0, total_stocks: 0 });
+      const [results, setResults] = useState(null);
+      const [tab, setTab] = useState('final');
+      const pollRef = useRef(null);
+
+      const startScan = useCallback(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/scan`, { method: 'POST' });
+          if (res.ok) {
+            setStatus('scanning');
+            setResults(null);
+            startPolling();
+          }
+        } catch (e) {
+          alert('Cannot connect to backend. Make sure the API is running at ' + API_BASE);
+        }
+      }, []);
+
+      const startPolling = () => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(async () => {
+          try {
+            const res = await fetch(`${API_BASE}/status`);
+            const data = await res.json();
+            setProgress(data);
+            setStatus(data.status);
+
+            if (data.status === 'complete' || data.status === 'error') {
+              clearInterval(pollRef.current);
+              // Fetch results
+              const rres = await fetch(`${API_BASE}/results`);
+              const rdata = await rres.json();
+              setResults(rdata);
+            }
+          } catch (e) {
+            console.error('Poll error', e);
+          }
+        }, 1500);
+      };
+
+      useEffect(() => {
+        // Check if there are existing results on load
+        fetch(`${API_BASE}/results`)
+          .then(r => r.json())
+          .then(d => {
+            if (d.status === 'complete') {
+              setStatus('complete');
+              setResults(d);
+            } else if (d.status === 'scanning') {
+              setStatus('scanning');
+              startPolling();
+            }
+          })
+          .catch(() => {});
+        return () => { if (pollRef.current) clearInterval(pollRef.current); };
+      }, []);
+
+      const tabData = {
+        final: { stocks: results?.final_stocks, title: 'Final Picks — RS High + Buy Signal', icon: '🎯', color: 'var(--accent-green)' },
+        rs: { stocks: results?.rs_highs, title: 'RS New Highs', icon: '📈', color: 'var(--accent-cyan)' },
+        buy: { stocks: results?.buy_signals, title: 'Buy Signals', icon: '💎', color: 'var(--accent-blue)' },
+      };
+
+      const activeTab = tabData[tab];
+
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+          <Header status={status} lastScan={results?.last_scan_time} />
+
+          <main style={{ flex: 1, padding: '24px 32px', maxWidth: 1200, margin: '0 auto', width: '100%' }}>
+            {status === 'idle' && !results && <EmptyState onScan={startScan} />}
+
+            {status === 'scanning' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                <ProgressBar
+                  progress={progress.progress}
+                  current={progress.current_stock}
+                  scanned={progress.scanned_count}
+                  total={progress.total_stocks}
+                />
+              </div>
+            )}
+
+            {results && status !== 'scanning' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Stats */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: 16,
+                }}>
+                  <StatCard title="Final Picks" value={results.total_final} icon="🎯" color="var(--accent-green)" bgColor="var(--accent-green-bg)" delay={1} />
+                  <StatCard title="RS New Highs" value={results.total_rs} icon="📈" color="var(--accent-cyan)" bgColor="var(--accent-blue-bg)" delay={2} />
+                  <StatCard title="Buy Signals" value={results.total_buy} icon="💎" color="var(--accent-blue)" bgColor="var(--accent-blue-bg)" delay={3} />
+                  <StatCard title="Stocks Scanned" value={Object.keys(results.stock_details).length} icon="🔍" color="var(--text-muted)" bgColor="rgba(100,116,139,0.05)" delay={4} />
+                </div>
+
+                {/* Re-scan button */}
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <ScanButton status={status} onScan={startScan} />
+                </div>
+
+                {/* Tabs */}
+                <div style={{
+                  display: 'flex', gap: 4,
+                  background: 'var(--bg-secondary)',
+                  padding: 4, borderRadius: 10,
+                  border: '1px solid var(--border)',
+                  width: 'fit-content',
+                }}>
+                  {[
+                    { key: 'final', label: `Final Picks (${results.total_final})`, color: 'var(--accent-green)' },
+                    { key: 'rs', label: `RS Highs (${results.total_rs})`, color: 'var(--accent-cyan)' },
+                    { key: 'buy', label: `Buy Signals (${results.total_buy})`, color: 'var(--accent-blue)' },
+                  ].map(t => (
+                    <button key={t.key} onClick={() => setTab(t.key)} style={{
+                      padding: '8px 18px',
+                      borderRadius: 8,
+                      border: 'none',
+                      background: tab === t.key ? 'var(--bg-card)' : 'transparent',
+                      color: tab === t.key ? t.color : 'var(--text-muted)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: "'DM Sans', sans-serif",
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      boxShadow: tab === t.key ? 'var(--shadow)' : 'none',
+                    }}>{t.label}</button>
+                  ))}
+                </div>
+
+                {/* Table */}
+                {activeTab.stocks && activeTab.stocks.length > 0 ? (
+                  <StockTable
+                    stocks={activeTab.stocks}
+                    details={results.stock_details}
+                    title={activeTab.title}
+                    color={activeTab.color}
+                    icon={activeTab.icon}
+                  />
+                ) : (
+                  <div style={{
+                    padding: 48,
+                    textAlign: 'center',
+                    color: 'var(--text-muted)',
+                    background: 'var(--bg-card)',
+                    borderRadius: 'var(--radius)',
+                    border: '1px solid var(--border)',
+                  }}>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>🔇</div>
+                    No stocks matched this filter today.
+                  </div>
+                )}
+
+                <InfoBox />
+              </div>
+            )}
+          </main>
+
+          <footer style={{
+            padding: '16px 32px',
+            borderTop: '1px solid var(--border)',
+            textAlign: 'center',
+          }}>
+            <p className="mono" style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+              FOR EDUCATIONAL PURPOSES ONLY — NOT FINANCIAL ADVICE · Data from Yahoo Finance · Built with FastAPI + React
+            </p>
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
