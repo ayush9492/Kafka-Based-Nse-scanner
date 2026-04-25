@@ -1,145 +1,184 @@
-# ⚡ NSE Scanner — RS New High × Buy Signal
+# NSE Scanner — Kafka-Powered RS + Buy Signal
 
-A real-time stock scanner + backtested trading strategy for 200+ NSE stocks. Scans for **Relative Strength New Highs** combined with multi-factor **Buy Signals**, then surfaces the intersection as final picks.
+Real-time stock scanner for 200+ NSE stocks. Publishes scan jobs to Kafka, processes them in parallel across N worker processes, and surfaces stocks hitting **Relative Strength New High** × **Buy Signal** simultaneously.
 
-**🔴 Live App:** [nsescanner-production.up.railway.app/app](https://nsescanner-production.up.railway.app/app)
+**Live App:** [nsescanner-production.up.railway.app/app](https://nsescanner-production.up.railway.app/app)
 
-> ⚠️ **Disclaimer**: For educational purposes only. Not financial advice.
+> **Disclaimer:** Educational purposes only. Not financial advice.
 
 ---
 
-## 📋 Scan Criteria
+## How It Works
 
-**Final Picks** = Stocks hitting BOTH conditions simultaneously:
+```
+POST /scan
+    │
+    ▼
+app.py  ──► nse-scanner.scan-requests (Kafka topic, 8 partitions)
+                    │
+          ┌─────────┼─────────┐
+          ▼         ▼         ▼
+      worker 1  worker 2 ... worker 8   (scanner_worker.py × N)
+          │         │         │
+          └─────────┼─────────┘
+                    ▼
+        nse-scanner.scan-results (Kafka topic)
+                    │
+                    ▼
+         app.py background collector
+                    │
+                    ▼
+         scan_state (progress, rs_highs, buy_signals)
+```
+
+Each worker independently fetches OHLCV via yfinance, runs all indicator checks, and publishes results. The API's collector thread folds results into live scan state as they arrive.
+
+---
+
+## Scan Criteria
+
+**Final Picks** = stocks passing **both** conditions:
 
 | # | Filter | Condition |
 |---|--------|-----------|
-| RS | **Relative Strength New High** | RS line (Stock/Nifty50) making a new 123-day high |
-| C1 | **DI+ Jump** | Plus DI increases by ≥ 10 in a single day (5-period) |
-| C2 | **Volume Value** | Trade value > ₹5 Crore |
-| C3 | **EMA Stack** | EMA 10 > EMA 20 > EMA 50 (bullish alignment) |
-| C4 | **Weekly RSI** | Weekly RSI ≥ 59 (momentum confirmation) |
-| C5 | **SMA Trend** | 50-day SMA rising for 5 consecutive days |
-| C6 | **Volume Spike** | Volume above 20-day average |
+| RS | **Relative Strength New High** | RS line (Stock/Nifty50 × 7000) making new 123-day high |
+| C1 | **DI+ Jump** | Plus DI increases ≥ 10 in one day (5-period) |
+| C2 | **Volume Value** | Trade value > ₹5 Crore (price × volume > 50M) |
+| C3 | **EMA Stack** | EMA 10 > EMA 20 > EMA 50 |
+| C4 | **Weekly RSI** | Weekly RSI ≥ 59 |
+| C5 | **SMA Uptrend** | 50-day SMA rising 5 consecutive days |
+| C6 | **Volume Breakout** | Volume above 20-day SMA |
 
 ---
 
-## 📊 Backtest Results (3 Years | 1:2 Risk-Reward)
+## Backtest Results (3 Years | 1:2 Risk-Reward)
 
-Backtested over 2023–2026 on 200+ NSE stocks with **max 5 concurrent positions**, **1 position per stock** (no re-entry while holding), and **20% capital per position**.
+Tested on 200+ NSE stocks, 2023–2026. Rules: max 5 concurrent positions, 20% capital per position, no re-entry while holding.
 
-### Strategy Comparison
+| Strategy | Win Rate | Expectancy | Profit Factor | Max Drawdown | Avg Hold |
+|----------|----------|------------|---------------|--------------|----------|
+| SL 3% → TGT 6% | 42.2% | +0.80% | 1.46x | -7.6% | 6 days |
+| SL 5% → TGT 10% | 44.4% | +1.65% | 1.60x | -11.8% | 15 days |
+| SL 7% → TGT 14% | 47.4% | +2.93% | 1.80x | -21.7% | 27 days |
+| **SL 10% → TGT 20%** | **51.5%** | **+5.35%** | **2.13x** | -43.5% | 50 days |
 
-| Strategy | Win Rate | Expectancy | Profit Factor | Max Drawdown | Avg Holding |
-|----------|----------|------------|---------------|--------------|-------------|
-| SL 3% → Target 6% | 42.2% | +0.80% | 1.46x | -7.6% | 6 days |
-| SL 5% → Target 10% | 44.4% | +1.65% | 1.60x | -11.8% | 15 days |
-| SL 7% → Target 14% | 47.4% | +2.93% | 1.80x | -21.7% | 27 days |
-| **SL 10% → Target 20%** | **51.5%** | **+5.35%** | **2.13x** | -43.5% | 50 days |
-
-### Equity Curves
-
-**SL 10% / Target 20% (Best Expectancy)**
-
-![Equity SL10 TGT20](backtest_results/equity_SL10_TGT20.png)
-
-**All Strategies Combined**
-
-![All Strategies](backtest_results/equity_all_combined.png)
-
-**Strategy Comparison Charts**
-
-![Backtest Comparison](backtest_results/backtest_1to2.png)
-
-### Position Management Rules
-
-- **Max 5 stocks** held at the same time
-- **1 position per stock** — if scanner signals a stock you already hold, skip it
-- **No re-entry** until position is closed (target or stop hit)
-- **Once closed**, the stock is immediately available for re-entry on next signal
-- **20% capital** allocated per position (5 × 20% = 100%)
-
-### Key Insights
-
-- All 4 RR setups are profitable — the strategy has a genuine edge
-- Wider stops = higher win rate (more room to breathe) but deeper drawdowns
-- **SL 5% / TGT 10%** offers the best risk-adjusted balance: decent expectancy with manageable -11.8% max drawdown
-- **SL 10% / TGT 20%** has the highest returns but -43.5% drawdown — requires strong conviction
-- Strategy works best in trending markets; bleeds during choppy/bearish phases (late 2024 – early 2026)
+**Key insight:** SL 5%/TGT 10% gives best risk-adjusted returns (-11.8% drawdown vs +1.65% expectancy). SL 10%/TGT 20% has highest absolute returns but -43.5% drawdown requires strong conviction.
 
 ---
 
-## 🚀 Quick Start
+## Local Setup
 
-### Run Locally
+### Prerequisites
+
+- Python 3.11+
+- Docker Desktop (running)
+- TA-Lib C binary ([Windows wheel](https://github.com/cgohlke/talib-build/releases) — pick your Python version)
+
+### 1. Install dependencies
 
 ```bash
-# 1. Install TA-Lib C library
-# macOS:
-brew install ta-lib
-# Ubuntu:
-sudo apt-get install -y build-essential wget
-wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
-tar -xzf ta-lib-0.4.0-src.tar.gz
-cd ta-lib && ./configure --prefix=/usr && make && sudo make install
+# Windows: install TA-Lib wheel first
+pip install TA_Lib-0.4.xx-cp3xx-cp3xx-win_amd64.whl
 
-# 2. Install Python deps
 pip install -r requirements.txt
-
-# 3. Run
-python app.py
-
-# 4. Open browser
-# http://localhost:8000/app
 ```
 
-### Deploy to Railway
-
-1. Push repo to GitHub
-2. Go to [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub**
-3. Select your repo (Railway auto-detects the Dockerfile)
-4. After deploy → **Settings** → **Networking** → **Generate Domain**
-5. Access at `https://your-app.up.railway.app/app`
-
----
-
-## 🧪 Run the Backtest
+### 2. Start Kafka
 
 ```bash
-# Make sure TA-Lib is installed (see above)
-pip install yfinance TA-Lib pandas numpy matplotlib
-
-# Run backtest (takes ~10-15 min to download 3yr data for 200+ stocks)
-python backtest.py
+docker-compose up -d
 ```
 
-**Outputs saved to `backtest_output/`:**
+Wait ~20 seconds, verify broker is ready:
 
-| File | Description |
-|------|-------------|
-| `equity_SL3_TGT6.png` | Equity curve — 3% SL / 6% target |
-| `equity_SL5_TGT10.png` | Equity curve — 5% SL / 10% target |
-| `equity_SL7_TGT14.png` | Equity curve — 7% SL / 14% target |
-| `equity_SL10_TGT20.png` | Equity curve — 10% SL / 20% target |
-| `equity_all_combined.png` | All 4 strategies overlaid |
-| `backtest_1to2.png` | Win rate, expectancy, profit factor comparison |
-| `summary.csv` | All metrics in one table |
-| `trades_SL*_TGT*.csv` | Individual trade logs per strategy |
+```bash
+docker-compose logs kafka | Select-Object -Last 5
+# Look for: [KafkaServer id=1] started
+```
+
+### 3. Create Kafka topics
+
+```bash
+python kafka_admin.py
+# Output: Created: nse-scanner.scan-requests, nse-scanner.scan-results (8 partitions each)
+```
+
+### 4. Start workers
+
+Open up to 8 terminals (one per partition for max throughput):
+
+```bash
+python scanner_worker.py
+```
+
+Expected:
+```
+HH:MM:SS [INFO] connecting to Kafka @ localhost:9092
+HH:MM:SS [INFO] ready — subscribed to 'nse-scanner.scan-requests', group 'nse-scanner-workers'
+```
+
+### 5. Start the API
+
+```bash
+python app.py
+```
+
+Open [http://localhost:8000/app](http://localhost:8000/app) → click **Run Scan**.
 
 ---
 
-## 📁 Project Structure
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/scan` | Trigger scan (publishes all symbols to Kafka) |
+| `GET` | `/status` | Live progress: scanned count, current stock, Kafka health |
+| `GET` | `/results` | Final results: rs_highs, buy_signals, final_stocks, details |
+| `GET` | `/stocks` | List all symbols from stocks.txt |
+| `GET` | `/stock/{symbol}` | OHLCV + RS line data for charting |
+| `GET` | `/app` | Serve React frontend |
+| `GET` | `/docs` | Swagger UI |
+
+---
+
+## Scaling
+
+| Workers | Approx speed | Time for 216 stocks |
+|---------|-------------|---------------------|
+| 1 | ~1 stock/sec | ~3–4 min |
+| 4 | ~3–4 stocks/sec | ~60–90 sec |
+| 8 | ~5–7 stocks/sec | ~30–45 sec |
+
+Max useful workers = number of partitions (default: 8). Beyond 8, extra workers sit idle. Beyond ~8 workers you may also hit yfinance rate limits (429s) — add `time.sleep(0.2)` in the worker loop if that happens.
+
+---
+
+## Worker Log Icons
+
+| Icon | Meaning |
+|------|---------|
+| `★` | Passed both RS High + Buy Signal (final pick) |
+| `✓` | Passed one of the two checks |
+| `·` | Processed, no signal |
+| `✗` | Error (yfinance failure, insufficient data, etc.) |
+
+---
+
+## Project Structure
 
 ```
 NSE_Scanner/
-├── app.py                  # FastAPI backend + scanner logic
-├── index.html              # React frontend (single file, no build step)
-├── backtest.py             # Backtesting engine (1:2 RR)
-├── requirements.txt        # Python dependencies
-├── Dockerfile              # Docker build for Railway/cloud deploy
-├── railway.toml            # Railway deployment config
-├── Readme.md
-└── backtest_results/       # Backtest output charts + CSVs
+├── app.py              # FastAPI backend + Kafka producer + result collector
+├── scanner_worker.py   # Kafka consumer worker — run N instances
+├── kafka_config.py     # Shared constants, topic names, stocks.txt loader
+├── kafka_admin.py      # One-time topic creation (idempotent)
+├── docker-compose.yml  # Zookeeper + Kafka broker
+├── stocks.txt          # ~216 NSE symbols (edit freely)
+├── index.html          # React frontend (single file, no build step)
+├── backtest.py         # 3-year backtest engine (1:2 RR, 4 SL levels)
+├── Dockerfile          # Docker build for Railway/cloud deploy
+├── railway.toml        # Railway deployment config
+└── backtest_output/
     ├── summary.csv
     ├── backtest_1to2.png
     ├── equity_SL3_TGT6.png
@@ -152,45 +191,87 @@ NSE_Scanner/
 
 ---
 
-## 🔌 API Endpoints
+## Editing the Stock List
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/scan` | Start a background scan |
-| `GET` | `/status` | Get scan progress |
-| `GET` | `/results` | Get scan results |
-| `GET` | `/stock/{symbol}` | Get chart data for a stock |
-| `GET` | `/app` | Serve the frontend |
+Edit `stocks.txt` — one symbol per line. `.NS` suffix optional (workers append it).
 
----
+```
+RELIANCE
+TCS
+INFY
+# Excluded:
+# HDFCBANK
+ICICIBANK
+```
 
-## 🛠️ Customization
-
-**Add/Remove Stocks** — Edit `STOCK_LIST` in `app.py`
-
-**Change Scan Parameters** in `app.py`:
-- `window=123` — RS lookback period
-- `timeperiod=5` — DI period
-- `timeperiod=10/20/50` — EMA periods
-- `>= 59` — Weekly RSI threshold
-- `> 50_000_000` — Minimum volume value (₹5Cr)
-
-**Change Backtest Settings** in `backtest.py`:
-- `BACKTEST_YEARS = 3` — History to test
-- `MAX_POSITIONS = 5` — Concurrent positions
-- `RR_PAIRS` — Stop-loss / target combinations
+Restart `app.py` after editing (list loads once at startup).
 
 ---
 
-## 🧰 Tech Stack
+## Run the Backtest
 
-- **Backend**: Python, FastAPI, TA-Lib, yfinance, pandas, NumPy
-- **Frontend**: React (single HTML file, no build step)
-- **Deploy**: Docker, Railway
-- **Data**: Yahoo Finance API (NSE stocks via `.NS` suffix)
+```bash
+python backtest.py
+# Takes ~10–15 min (downloads 3yr data for 200+ stocks)
+```
+
+Outputs saved to `backtest_output/`:
+
+| File | Description |
+|------|-------------|
+| `summary.csv` | All metrics in one table |
+| `equity_SL*.png` | Equity curve per SL/target combo |
+| `equity_all_combined.png` | All 4 strategies overlaid |
+| `backtest_1to2.png` | Win rate / expectancy / profit factor chart |
+| `trades_SL*_TGT*.csv` | Individual trade log per strategy |
 
 ---
 
-## 📝 License
+## Resetting Kafka
 
-MIT — Use freely, modify as you like.
+```bash
+# Stop containers (keep data)
+docker-compose down
+
+# Stop + wipe all topic data
+docker-compose down -v
+```
+
+---
+
+## Deploy to Railway
+
+### API (existing Dockerfile works)
+
+1. Push repo to GitHub
+2. [railway.app](https://railway.app) → New Project → Deploy from GitHub
+3. Settings → Networking → Generate Domain
+4. App at `https://your-app.up.railway.app/app`
+
+### Kafka in Production (Confluent Cloud free tier)
+
+1. Sign up at [confluent.cloud](https://confluent.cloud) → create cluster → get bootstrap server + API key
+2. Set env vars on Railway:
+   - `KAFKA_BOOTSTRAP=pkc-xxxxx.confluent.cloud:9092`
+3. Add SASL auth in `kafka_config.py` (see kafka-python docs for `sasl_plain_username` / `sasl_plain_password`)
+4. Deploy workers as a separate Railway service: `python scanner_worker.py`
+
+---
+
+## Tech Stack
+
+| Layer | Tech |
+|-------|------|
+| Backend | Python, FastAPI, uvicorn |
+| Indicators | TA-Lib (C), pandas, NumPy |
+| Market data | yfinance (Yahoo Finance, `.NS` suffix for NSE) |
+| Message broker | Apache Kafka (via kafka-python) |
+| Frontend | React (single HTML file, no build step) |
+| Containerization | Docker, docker-compose |
+| Deploy | Railway (Dockerfile), Confluent Cloud (managed Kafka) |
+
+---
+
+## License
+
+MIT — use freely, modify as needed.
