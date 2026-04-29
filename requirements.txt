@@ -7,3 +7,6 @@ numpy>=1.24.0
 
 # Kafka pipeline
 kafka-python>=2.0.2
+
+# Bulk fetcher (Method B: raw Yahoo + Chrome TLS impersonation)
+curl_cffi>=0.7.0
