@@ -19,17 +19,23 @@ TOPIC_SCAN_RESULTS = "nse-scanner.scan-results"
 WORKER_GROUP = "nse-scanner-workers"
 
 # More partitions = more workers can process in parallel. Tune to your fleet.
-DEFAULT_PARTITIONS = 8
+DEFAULT_PARTITIONS = 16
 DEFAULT_REPLICATION = 1  # single-broker dev cluster
 
 # Durability / performance knobs
 PRODUCER_ACKS = "all"                  # wait for full ISR
 CONSUMER_AUTO_OFFSET_RESET = "earliest"
-CONSUMER_MAX_POLL_RECORDS = 10         # pace ourselves vs. yfinance rate limits
-INTER_STOCK_DELAY_SEC = 0.15           # sleep between stocks to avoid Yahoo 429s
-YFINANCE_RETRIES = 3                   # retry attempts on empty/failed fetch
+CONSUMER_MAX_POLL_RECORDS = 50         # bigger poll → bigger fetch batches
+INTER_STOCK_DELAY_SEC = 0.0            # 0 — bulk fetch + curl_cffi avoids 429s
+YFINANCE_RETRIES = 2                   # retry attempts on empty/failed fetch
 REQUEST_TIMEOUT_MS = 30_000
 SESSION_TIMEOUT_MS = 30_000
+
+# Bulk-fetch tuning
+FETCH_METHOD = os.environ.get("FETCH_METHOD", "B")   # "A" = yf.download batch, "B" = curl_cffi raw
+FETCH_BATCH_SIZE = int(os.environ.get("FETCH_BATCH_SIZE", "50"))   # tickers per batch fetch
+FETCH_THREADS   = int(os.environ.get("FETCH_THREADS",   "20"))     # threads for Method B
+TA_THREADS      = int(os.environ.get("TA_THREADS",      "8"))      # threads for TA-Lib calc
 
 
 # ─── Scanner ──────────────────────────────────────────────────────────────────
