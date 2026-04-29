@@ -37,6 +37,10 @@ FETCH_BATCH_SIZE = int(os.environ.get("FETCH_BATCH_SIZE", "50"))   # tickers per
 FETCH_THREADS   = int(os.environ.get("FETCH_THREADS",   "20"))     # threads for Method B
 TA_THREADS      = int(os.environ.get("TA_THREADS",      "8"))      # threads for TA-Lib calc
 
+# Multi-consumer in single process — N internal threads, each its own KafkaConsumer.
+# Same effect as launching N worker processes, but one terminal / one command.
+WORKER_THREADS  = int(os.environ.get("WORKER_THREADS",  "8"))      # internal consumer threads
+
 
 # ─── Scanner ──────────────────────────────────────────────────────────────────
 INDEX_SYMBOL = "^NSEI"

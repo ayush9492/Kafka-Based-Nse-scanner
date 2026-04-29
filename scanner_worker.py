@@ -16,10 +16,18 @@ from __future__ import annotations
 import json
 import logging
 import signal
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+CST = ZoneInfo("America/Chicago")
+
+
+def _now_cst() -> datetime:
+    return datetime.now(CST)
 
 import numpy as np
 import pandas as pd
@@ -45,13 +53,15 @@ from kafka_config import (
     VOL_THRESHOLD_INDIA,
     VOL_THRESHOLD_USA,
     WORKER_GROUP,
+    WORKER_THREADS,
 )
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
+    datefmt="%H:%M:%S %Z",
 )
+logging.Formatter.converter = lambda *args: datetime.now(CST).timetuple()
 log = logging.getLogger("scanner-worker")
 
 
@@ -255,7 +265,7 @@ def _process_market_batch(market: str, msgs: List[dict], producer: KafkaProducer
             "request_id":   msg.get("request_id"),
             "symbol":       symbol,
             "market":       market,
-            "processed_at": datetime.utcnow().isoformat(),
+            "processed_at": _now_cst().isoformat(),
             "elapsed_ms":   round(elapsed_ms, 1),
             **res,
         }
@@ -280,34 +290,26 @@ def _process_market_batch(market: str, msgs: List[dict], producer: KafkaProducer
     return processed
 
 
-def run_worker() -> None:
-    signal.signal(signal.SIGINT, _handle_signal)
-    signal.signal(signal.SIGTERM, _handle_signal)
+_total_lock = threading.Lock()
+_total_processed = 0
 
-    log.info(f"connecting to Kafka @ {KAFKA_BOOTSTRAP}")
-    log.info(f"FETCH_METHOD={FETCH_METHOD}  BATCH={FETCH_BATCH_SIZE}  "
-             f"FETCH_THREADS={FETCH_THREADS}  TA_THREADS={TA_THREADS}")
+
+def _consumer_thread_loop(thread_id: int, producer: KafkaProducer) -> None:
+    """One consumer thread. Joins WORKER_GROUP — Kafka assigns partitions across threads."""
+    global _total_processed
 
     consumer = KafkaConsumer(
         TOPIC_SCAN_REQUESTS,
         bootstrap_servers=KAFKA_BOOTSTRAP,
         group_id=WORKER_GROUP,
+        client_id=f"worker-thread-{thread_id}",
         auto_offset_reset=CONSUMER_AUTO_OFFSET_RESET,
         enable_auto_commit=True,
         session_timeout_ms=SESSION_TIMEOUT_MS,
         value_deserializer=_json_des,
         max_poll_records=CONSUMER_MAX_POLL_RECORDS,
     )
-    producer = KafkaProducer(
-        bootstrap_servers=KAFKA_BOOTSTRAP,
-        acks=PRODUCER_ACKS,
-        value_serializer=_json_ser,
-        key_serializer=lambda k: k.encode("utf-8") if k else None,
-        linger_ms=20,
-        batch_size=64 * 1024,
-    )
-    log.info(f"ready — subscribed to '{TOPIC_SCAN_REQUESTS}', group '{WORKER_GROUP}'")
-    total = 0
+    log.info(f"[t{thread_id}] subscribed, polling…")
 
     try:
         while not _shutdown:
@@ -315,13 +317,12 @@ def run_worker() -> None:
             if not batch:
                 continue
 
-            # Flatten + group by market
             by_market: Dict[str, List[dict]] = {}
             for tp_records in batch.values():
                 for record in tp_records:
                     msg = record.value
                     if not isinstance(msg, dict) or "symbol" not in msg:
-                        log.warning(f"skip malformed: {msg!r}")
+                        log.warning(f"[t{thread_id}] skip malformed: {msg!r}")
                         continue
                     by_market.setdefault(msg.get("market", "india"), []).append(msg)
 
@@ -333,18 +334,60 @@ def run_worker() -> None:
                     break
 
             producer.flush(timeout=10)
-            total += n
+            with _total_lock:
+                _total_processed += n
+                grand_total = _total_processed
             elapsed = time.monotonic() - t0
-            log.info(f"batch done: {n} stocks in {elapsed:.1f}s "
-                     f"({n/max(elapsed,0.001):.1f} stk/s) — total {total}")
+            log.info(f"[t{thread_id}] batch: {n} stocks in {elapsed:.1f}s "
+                     f"({n/max(elapsed,0.001):.1f} stk/s) — grand total {grand_total}")
 
             if INTER_STOCK_DELAY_SEC > 0:
                 time.sleep(INTER_STOCK_DELAY_SEC)
+    except Exception as exc:
+        log.error(f"[t{thread_id}] crashed: {exc}")
     finally:
-        log.info("closing consumer + producer")
         consumer.close()
+        log.info(f"[t{thread_id}] stopped")
+
+
+def run_worker() -> None:
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
+    log.info(f"connecting to Kafka @ {KAFKA_BOOTSTRAP}")
+    log.info(f"WORKER_THREADS={WORKER_THREADS}  FETCH_METHOD={FETCH_METHOD}  "
+             f"BATCH={FETCH_BATCH_SIZE}  FETCH_THREADS={FETCH_THREADS}  TA_THREADS={TA_THREADS}")
+
+    producer = KafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP,
+        acks=PRODUCER_ACKS,
+        value_serializer=_json_ser,
+        key_serializer=lambda k: k.encode("utf-8") if k else None,
+        linger_ms=20,
+        batch_size=64 * 1024,
+    )
+
+    threads: List[threading.Thread] = []
+    for i in range(WORKER_THREADS):
+        t = threading.Thread(
+            target=_consumer_thread_loop,
+            args=(i, producer),
+            name=f"worker-{i}",
+            daemon=True,
+        )
+        t.start()
+        threads.append(t)
+    log.info(f"spawned {WORKER_THREADS} consumer threads")
+
+    try:
+        while not _shutdown:
+            time.sleep(0.5)
+    finally:
+        log.info("shutting down…")
+        for t in threads:
+            t.join(timeout=10)
         producer.close(timeout=5)
-        log.info(f"worker stopped. processed {total} message(s).")
+        log.info(f"all stopped. grand total {_total_processed} messages.")
 
 
 if __name__ == "__main__":

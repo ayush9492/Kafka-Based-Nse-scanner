@@ -18,8 +18,15 @@ import time
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
+
+CST = ZoneInfo("America/Chicago")
+
+
+def _now_cst() -> datetime:
+    return datetime.now(CST)
 from fastapi import BackgroundTasks, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -39,8 +46,10 @@ from kafka_config import (
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
+    datefmt="%H:%M:%S %Z",
 )
+# Force log timestamps to CST
+logging.Formatter.converter = lambda *args: datetime.now(CST).timetuple()
 log = logging.getLogger("scanner-api")
 
 app = FastAPI(title="Stock Scanner API (Kafka)")
@@ -160,7 +169,7 @@ def _apply_result(result: Dict[str, Any]) -> None:
             final = sorted(set(state["rs_highs"]) & set(state["buy_signals"]))
             state["final_stocks"] = final
             state["status"] = "complete"
-            state["last_scan_time"] = datetime.utcnow().isoformat()
+            state["last_scan_time"] = _now_cst().isoformat()
             state["progress"] = 100
             log.info(
                 f"[{market}] scan complete: {len(state['rs_highs'])} RS highs, "
